@@ -40,8 +40,6 @@
       .v-stripe { color: transparent !important; -webkit-background-clip: text; background-clip: text; }
       .v-shape { width: 0.62em; height: 0.62em; bottom: 0.02em !important; }
 
-      #prompt { font-family: "InterT"; font-weight: 500; letter-spacing: -0.012em; color: var(--mute); }
-      #prompt .ch { transform-origin: 50% 80%; }
     </style>
   </head>
   <body>
@@ -51,7 +49,6 @@
         <div class="line" id="l1" style="font-size:228px"></div>
         <div class="line" id="l2" style="font-size:228px"></div>
         <div class="line" id="l3" style="font-size:196px"></div>
-        <div class="line" id="prompt" style="font-size:72px"></div>
         <div class="line" id="l5" style="font-size:196px"></div>
         <div class="line" id="logo" style="font-size:168px; letter-spacing:-0.03em"></div>
       </div>
@@ -112,7 +109,6 @@
         const L1 = build(document.getElementById("l1"), ["Motıon", "designs"]);
         const L2 = build(document.getElementById("l2"), ["made", "by", "AI"]);
         const L3 = build(document.getElementById("l3"), ["All", "in", "one", "gallery."]);
-        const PR = build(document.getElementById("prompt"), ["“Five dots orbit, then snap into a line.”"]);
         const L5 = build(document.getElementById("l5"), ["Each", "with", "its", "prompt"]);
         const LOGO = buildGlitch(document.getElementById("logo"), "Motion Crackers");
 
@@ -149,7 +145,7 @@
 
         // ---------- layout ----------
         let laidOut = false;
-        const lines = [L1, L2, L3, PR, L5, LOGO];
+        const lines = [L1, L2, L3, L5, LOGO];
         function layoutLine(L, cx, baselineY) {
           const el = L.el;
           el.style.left = "0px"; el.style.top = "0px";
@@ -172,7 +168,6 @@
           layoutLine(L1, CX, CY + capH(228) / 2);
           layoutLine(L2, CX, CY + capH(228) / 2);
           layoutLine(L3, CX, CY + capH(196) / 2);
-          layoutLine(PR, CX, 1170);
           layoutLine(L5, CX, CY + capH(196) / 2);
           // logo: text sits right of the mark, whole lockup centred
           LOGO.el.style.left = "0px";
@@ -290,19 +285,39 @@
           ctx.restore();
         }
 
-        // hero (orbit → line)
-        const SNAP0 = 12.5;
+        // hero: five orbiting dots
         function heroDots(t) {
           const pts = [];
           for (let i = 0; i < 5; i++) {
-            const orbit = (tt) => { const a = tt * 2.4 + (i * Math.PI * 2) / 5 - Math.PI / 2; const br = 110 + 6 * Math.sin(tt * 3 + i); return [Math.cos(a) * br, Math.sin(a) * br]; };
-            const ts = SNAP0 + i * S16;
-            const p = spring(seg(t, ts, ts + 0.42), 6.5, 1.6);
-            const o = orbit(Math.min(t, ts));
-            const lx = (i - 2) * 62, ly = 0;
-            pts.push([lerp(o[0], lx, p), lerp(o[1], ly, p), 1 + 0.35 * Math.sin(Math.PI * seg(t, ts, ts + 0.18))]);
+            const a = t * 2.4 + (i * Math.PI * 2) / 5 - Math.PI / 2, br = 110 + 6 * Math.sin(t * 3 + i);
+            pts.push([Math.cos(a) * br, Math.sin(a) * br, 1]);
           }
           return pts;
+        }
+        function drawHero(t, inner) {
+          ctx.fillStyle = INK; rrect(-TW / 2, -TH / 2, TW, TH, TR); ctx.fill();
+          if (inner <= 0) return;
+          ctx.save(); ctx.clip(); ctx.globalAlpha *= inner;
+          for (const [x, y, sc] of heroDots(t)) ellipse(x, y, 16 * sc, 16 * sc, "#ffffff");
+          ctx.restore();
+        }
+
+        // full-screen showcase: one design per beat, each grows out of a dot (10.5 – 14.0)
+        const SF = W / TW; // a tile scaled to fill the frame
+        const MONTAGE = [
+          { d: 2, bg: "#ff5a1f", fg: "#ffffff" },
+          { d: 3, bg: "#f0f0f1", fg: INK },
+          { d: 5, bg: "#2f6bff", fg: "#ffffff" },
+          { d: 4, bg: "#ffc400", fg: INK },
+          { d: 7, bg: "#ff3ea5", fg: "#ffffff" },
+          { d: 11, bg: "#00b37e", fg: INK },
+          { hero: true },
+        ];
+        const M0 = 10.5;
+        function drawFull(spec, t) {
+          ctx.save(); ctx.translate(CX, CY); ctx.scale(SF, SF);
+          if (spec.hero) drawHero(t, 1); else drawTile(spec, t);
+          ctx.restore();
         }
 
         // ---------- timeline of camera for gallery ----------
@@ -482,22 +497,21 @@
             const pr = REST.per2;
             // camera
             const zOut = eInOut3(seg(t, 6.38, 7.45));
-            const zIn = eInOutExpo(seg(t, 9.85, 10.85));
+            const zIn = eInOutExpo(seg(t, 9.82, 10.5));
             let s = Math.exp(lerp(Math.log(1), Math.log(ZS), zOut));
             let camX = 0, camY = lerp(0, CAMY_G, zOut);
             const heroX = rowOffset(0, t), heroY = -splitAmt(t);
-            const SZ = 2.2;
             if (zIn > 0) {
-              // move hero to (CX, 590) at SZ
+              // dive into the hero until it fills the frame
               const gx = (heroX - camX) * s + CX, gy = (heroY - camY) * s + CY;
-              const sx = Math.exp(lerp(Math.log(s), Math.log(SZ), zIn));
-              const px = lerp(gx, CX, zIn), py = lerp(gy, 590, zIn);
+              const sx = Math.exp(lerp(Math.log(s), Math.log(SF), zIn));
+              const px = lerp(gx, CX, zIn), py = lerp(gy, CY, zIn);
               s = sx; camX = heroX - (px - CX) / s; camY = heroY - (py - CY) / s;
             }
             const toScreen = (wx, wy) => [(wx - camX) * s + CX, (wy - camY) * s + CY];
 
             // neighbours
-            const neighA = 1 - eOut3(seg(t, 10.0, 10.5));
+            const neighA = 1 - eOut3(seg(t, 9.95, 10.35));
             if (t >= 6.4 && neighA > 0) {
               for (let r = -4; r <= 5; r++) for (let c = -6; c <= 6; c++) {
                 if (c === 0 && r === 0) continue;
@@ -554,6 +568,22 @@
               }
               ctx.restore();
             }
+
+            // showcase cuts on every beat; the last one is the hero again, which then collapses
+            if (t >= M0 && t < 14.0) {
+              const i = Math.min(MONTAGE.length - 1, Math.floor((t - M0) / B));
+              if (i > 0) drawFull(MONTAGE[i - 1], t);
+              const ct = M0 + i * B;
+              const p = eOutExpo(seg(t, ct, ct + 0.36));
+              const g = eOut3(seg(t, ct, ct + 0.36));
+              const d0 = 56;
+              const w = lerp(d0, W + 240, p), h = lerp(d0, H + 240, p);
+              ctx.save();
+              rrect(CX - w / 2, CY - h / 2, w, h, lerp(d0 / 2, 90, g));
+              ctx.clip();
+              drawFull(MONTAGE[i], t);
+              ctx.restore();
+            }
           }
 
           // "All in one gallery."
@@ -565,19 +595,6 @@
               const p = eOutExpo(seg(t, st, st + 0.55));
               const q = eIn3(seg(t, 9.42 + 0.01 * k, 9.66 + 0.01 * k));
               chT(c.el, 0, 280 * (1 - p) - 280 * q);
-            });
-          }
-
-          // prompt typing
-          const showPR = t >= 10.7 && t < 14.3;
-          setLine(PR, showPR);
-          if (showPR) {
-            const n = PR.chars.length, t0 = 10.75, t1e = 12.2;
-            PR.chars.forEach((c, k) => {
-              const st = t0 + ((t1e - t0) * k) / (n - 1);
-              const p = seg(t, st, st + 0.12);
-              const q = eIn3(seg(t, 14.0, 14.22));
-              chT(c.el, 0, 14 * (1 - eOut3(p)) + 40 * q, 1, 1, eOut3(p) * (1 - q));
             });
           }
 

@@ -15,7 +15,7 @@ A 20-second launch film for **Motion Crackers**, a curated gallery of AI-generat
 | 2 – 4 s | **Motion designs** grows out from the "i". | The groove starts: kick, snare, hats, bass, an Am9 guitar stab. |
 | 4 – 6 s | **made by AI.** The letters "AI" glitch on 16th notes, then the full stop pops in. | Cross-sticks and muted guitar follow the glitch. A tom fill leads into the next bar. |
 | 6 – 10 s | The full stop grows into a tile. The camera pulls back to show a wall of moving designs. The rows part for **All in one gallery.** | A D9 chord hit, then the groove continues. |
-| 10 – 14 s | The camera pushes into one tile while its prompt types out underneath. The five dots snap into a line, one per 16th note. | A breakdown: vibraphone chords, with one marimba note for each dot. |
+| 10 – 14 s | The camera dives into one tile until it fills the frame. Then one full-screen motion design per beat, each growing out of a dot. | Vibraphone chords over a steady pulse, with one marimba note per cut. |
 | 14 – 16 s | The tile shrinks back into the full stop of **Each with its prompt.** | The groove comes back, then stops dead. |
 | 16 – 20 s | The dot falls and cracks to become the placeholder mark. **Motion Crackers** glitches in letter by letter and resolves at 17.5 s. | Stuttered chops on every glitch step, then the final Am9 chord rings out. |
 

@@ -338,34 +338,37 @@ mute(9.625, 4, -8)
 tom(9.75, "mhi", 6, -7, 0.2)
 tom(9.875, "floor", 6, -6, -0.2)
 
-# --- bars 5-6: zoom into one piece, the prompt types itself (10.0 – 14.0)
+# --- bars 5-6: dive into one piece, then a full-screen showcase — one design per beat (10.0 – 14.0)
 kick(10.0, 4, 0)
-bass(10.0, "F1", 1.9, -2, sustain=True, dyn="p")
+bass(10.0, "F1", 1.95, -2, sustain=True, dyn="p")
 for k, n in enumerate(FMAJ7):
-    vibes(10.0 + k * 0.012, n, -5, pan=-0.35 + 0.23 * k, length=1.95)
+    vibes(10.0 + k * 0.012, n, -6, pan=-0.35 + 0.23 * k, length=1.95)
 for s in range(32):
     tt = 10.0 + s * S16
     if s % 2 == 0:
-        hat(tt, 4 if s % 4 else 5, -8)
+        hat(tt, 5 if s % 4 else 6, -7 if s % 4 else -5)
     else:
-        hat(tt + 0.01, 2, -14)
-    shaker(tt, -22 if s % 2 else -18, i=s % 4)
-for tt in [10.5, 11.5, 13.5]:
-    xstick(tt, 3, -3)
-kick(11.0, 2, -6)
-kick(11.375, 2, -8)
-# 12.0: Em7 colour
-bass(12.0, "E1", 0.45, -3, sustain=True, dyn="p")
+        hat(tt + 0.01, 3, -12)
+    shaker(tt, -21 if s % 2 else -17, i=s % 4)
+bass(12.0, "E1", 1.45, -2, sustain=True, dyn="p")
 for k, n in enumerate(EM7):
-    vibes(12.0 + k * 0.012, n, -6, pan=-0.35 + 0.23 * k, length=1.0)
-# 12.5 – 13.0: five dots snap into a line — one marimba note per dot
-for k, n in enumerate(["A3", "C4", "D4", "E4", "G4"]):
-    marimba(12.5 + k * S16, n, -3 + k * 0.4, pan=-0.4 + 0.2 * k)
+    vibes(12.0 + k * 0.012, n, -7, pan=-0.35 + 0.23 * k, length=1.45)
+# every cut (a dot that grows into the next design) gets a marimba note + a kick or a cross-stick
+melody = ["A3", "C4", "E4", "D4", "G4", "E4", "A3"]
+for k, n in enumerate(melody):
+    tt = 10.5 + k * BEAT
+    marimba(tt, n, -2, pan=[-0.3, 0.3][k % 2] * 0.6)
+    if k % 2 == 0:
+        xstick(tt, 3, -2, pan=0.1)
+    else:
+        kick(tt, 3, -2)
+    mute(tt + 0.25, k % 5, -10)
+kick(12.0, 3, -3)
 kick(13.0, 3, -2)
 bass(13.0, "A1", 0.3, -2)
 bass(13.375, "A2", 0.1, -5)
 bass(13.75, "G1", 0.1, -4)
-# snare build into 14.0
+# snare build into 14.0 (the last design collapses into the full stop)
 for k in range(4):
     vsnare(13.5 + k * S16, "center", 1 + k, -10 + 2.5 * k)
 
