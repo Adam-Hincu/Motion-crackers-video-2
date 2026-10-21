@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=2560, height=1440" />
+    <title>Motion Crackers — Launch</title>
+    <script src="assets/vendor/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: "InterD"; src: url("assets/fonts/InterDisplay-Bold.woff2") format("woff2"); font-weight: 700; font-display: block; }
+      @font-face { font-family: "InterT"; src: url("assets/fonts/Inter-Medium.woff2") format("woff2"); font-weight: 500; font-display: block; }
+      @font-face { font-family: "SerifI"; src: url("assets/fonts/InstrumentSerif-Italic.ttf") format("truetype"); font-display: block; }
+      @font-face { font-family: "Mono"; src: url("assets/fonts/JetBrainsMono.ttf") format("truetype"); font-weight: 100 900; font-display: block; }
+
+      :root { --ink: #0b0b0c; --paper: #ffffff; --mute: #6e6e73; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 2560px; height: 1440px; overflow: hidden; background: var(--paper); }
+      #root { position: relative; width: 2560px; height: 1440px; overflow: hidden; background: var(--paper); }
+      #cv { position: absolute; inset: 0; width: 2560px; height: 1440px; }
+      #txt { position: absolute; inset: 0; pointer-events: none; }
+
+      .line {
+        position: absolute; left: 0; top: 0; white-space: pre;
+        font-family: "InterD"; font-weight: 700; color: var(--ink);
+        line-height: 1; letter-spacing: -0.035em; font-kerning: normal;
+        visibility: hidden;
+      }
+      .mask { display: inline-block; position: relative; clip-path: inset(-0.1em -0.6em -0.13em -0.6em); }
+      .ch { display: inline-block; position: relative; transform-origin: 50% 100%; will-change: transform; }
+      .bl { display: inline-block; width: 0; height: 0; vertical-align: baseline; }
+      .dot { position: absolute; background: var(--ink); border-radius: 50%; }
+
+      /* glitch glyphs */
+      .g { display: inline-block; position: relative; }
+      .g > .gb { display: inline-block; }
+      .g > .gv { position: absolute; left: 50%; bottom: 0; transform: translateX(-50%); display: none; white-space: pre; line-height: 1; }
+      .v-serif { font-family: "SerifI"; font-weight: 400; letter-spacing: 0; font-size: 1.16em; }
+      .v-mono { font-family: "Mono"; font-weight: 800; letter-spacing: 0; font-size: 0.92em; }
+      .v-outline { color: transparent !important; -webkit-text-stroke: 0.035em currentColor; }
+      .v-chip { font-size: 0.62em; color: #fff !important; padding: 0.16em 0.2em 0.1em; border-radius: 0.22em; bottom: 0.1em !important; letter-spacing: 0; }
+      .v-stripe { color: transparent !important; -webkit-background-clip: text; background-clip: text; }
+      .v-shape { width: 0.62em; height: 0.62em; bottom: 0.02em !important; }
+
+      #prompt { font-family: "InterT"; font-weight: 500; letter-spacing: -0.012em; color: var(--mute); }
+      #prompt .ch { transform-origin: 50% 80%; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="20" data-width="2560" data-height="1440" data-fps="60">
+      <canvas id="cv" class="clip" width="2560" height="1440" data-start="0" data-duration="20" data-track-index="0"></canvas>
+      <div id="txt" class="clip" data-start="0" data-duration="20" data-track-index="1">
+        <div class="line" id="l1" style="font-size:228px"></div>
+        <div class="line" id="l2" style="font-size:228px"></div>
+        <div class="line" id="l3" style="font-size:196px"></div>
+        <div class="line" id="prompt" style="font-size:72px"></div>
+        <div class="line" id="l5" style="font-size:196px"></div>
+        <div class="line" id="logo" style="font-size:168px; letter-spacing:-0.03em"></div>
+      </div>
+      <audio id="score" src="assets/audio/score.wav" data-start="0" data-duration="20" data-track-index="2" data-volume="1"></audio>
+    </div>
+
+    <script>
+      (function () {
+        const W = 2560, H = 1440, CX = W / 2, CY = H / 2;
+        const INK = "#0b0b0c";
+        const BPM = 120, B = 60 / BPM, S16 = B / 4;
+
+        // ---------- math ----------
+        const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+        const seg = (t, a, b) => clamp((t - a) / (b - a));
+        const lerp = (a, b, p) => a + (b - a) * p;
+        const eOut3 = (p) => 1 - Math.pow(1 - p, 3);
+        const eIn3 = (p) => p * p * p;
+        const eInOut3 = (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2);
+        const eOutExpo = (p) => (p >= 1 ? 1 : 1 - Math.pow(2, -10 * p));
+        const eInOutExpo = (p) => p <= 0 ? 0 : p >= 1 ? 1 : p < 0.5 ? Math.pow(2, 20 * p - 10) / 2 : (2 - Math.pow(2, -20 * p + 10)) / 2;
+        const eOutBack = (p, s = 1.7) => 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.pow(p - 1, 2);
+        // critically-underdamped spring, settles at 1
+        const spring = (p, k = 7, f = 2.2) => (p <= 0 ? 0 : p >= 1 ? 1 : 1 - Math.exp(-k * p) * Math.cos(f * Math.PI * p));
+        const hash = (a, b = 0) => { let h = Math.imul(a * 374761393 + b * 668265263, 1274126177); h ^= h >>> 13; h = Math.imul(h, 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+
+        // ---------- text building ----------
+        function build(el, words, opts = {}) {
+          el.innerHTML = "";
+          const chars = [];
+          words.forEach((w, wi) => {
+            const m = document.createElement("span"); m.className = "mask";
+            [...w].forEach((c) => {
+              const s = document.createElement("span"); s.className = "ch"; s.textContent = c;
+              m.appendChild(s); chars.push({ el: s, c, w: wi });
+            });
+            el.appendChild(m);
+            if (wi < words.length - 1) el.appendChild(document.createTextNode(" "));
+          });
+          const bl = document.createElement("span"); bl.className = "bl"; el.appendChild(bl);
+          return { el, chars, bl };
+        }
+        function buildGlitch(el, text) {
+          el.innerHTML = "";
+          const chars = [];
+          [...text].forEach((c) => {
+            if (c === " ") { el.appendChild(document.createTextNode(" ")); return; }
+            const g = document.createElement("span"); g.className = "g";
+            const b = document.createElement("span"); b.className = "gb"; b.textContent = c;
+            const v = document.createElement("span"); v.className = "gv";
+            g.appendChild(b); g.appendChild(v); el.appendChild(g);
+            chars.push({ g, b, v, c, state: -2 });
+          });
+          const bl = document.createElement("span"); bl.className = "bl"; el.appendChild(bl);
+          return { el, chars, bl };
+        }
+
+        const L1 = build(document.getElementById("l1"), ["Motıon", "designs"]);
+        const L2 = build(document.getElementById("l2"), ["made", "by", "AI"]);
+        const L3 = build(document.getElementById("l3"), ["All", "in", "one", "gallery."]);
+        const PR = build(document.getElementById("prompt"), ["“Five dots orbit, then snap into a line.”"]);
+        const L5 = build(document.getElementById("l5"), ["Each", "with", "its", "prompt"]);
+        const LOGO = buildGlitch(document.getElementById("logo"), "Motion Crackers");
+
+        // "AI" letters become glitch-able: replace their content
+        const aiChars = L2.chars.filter((c) => c.w === 2).map((c) => {
+          const g = c.el; g.classList.add("g"); g.textContent = "";
+          const b = document.createElement("span"); b.className = "gb"; b.textContent = c.c;
+          const v = document.createElement("span"); v.className = "gv";
+          g.appendChild(b); g.appendChild(v);
+          return { g, b, v, c: c.c, state: -2 };
+        });
+
+        // custom dots: tittle of ı, period after "AI", period after "prompt"
+        const UPM = 2048;
+        function addDot(host) { const d = document.createElement("div"); d.className = "dot"; host.appendChild(d); return d; }
+        const iSpan = L1.chars[3].el; // ı
+        const tittle = addDot(iSpan.parentNode);
+        const aiMask = L2.chars[L2.chars.length - 1].el.parentNode;
+        const per2Host = document.createElement("span"); per2Host.className = "ch"; per2Host.textContent = "."; per2Host.style.color = "transparent"; aiMask.appendChild(per2Host);
+        const per2 = addDot(per2Host);
+        const prMask = L5.chars[L5.chars.length - 1].el.parentNode;
+        const per5Host = document.createElement("span"); per5Host.className = "ch"; per5Host.textContent = "."; per5Host.style.color = "transparent"; prMask.appendChild(per5Host);
+        const per5 = addDot(per5Host);
+
+        // Inter Display Bold metrics (font units): tittle bbox 82..419 x 1189..1503; period 81..420 x -18..322
+        function placeTittle(fs) {
+          const u = fs / UPM;
+          Object.assign(tittle.style, { left: iSpan.offsetLeft + 82 * u + "px", width: 337 * u + "px", height: 314 * u + "px" });
+        }
+        function placePeriod(dot, fs) {
+          const u = fs / UPM;
+          Object.assign(dot.style, { left: 81 * u + "px", width: 339 * u + "px", height: 340 * u + "px" });
+        }
+
+        // ---------- layout ----------
+        let laidOut = false;
+        const lines = [L1, L2, L3, PR, L5, LOGO];
+        function layoutLine(L, cx, baselineY) {
+          const el = L.el;
+          el.style.left = "0px"; el.style.top = "0px";
+          const r = el.getBoundingClientRect();
+          const b = L.bl.getBoundingClientRect();
+          L.w = r.width; L.base0 = b.top - r.top;
+          L.x = Math.round(cx - r.width / 2); L.y = Math.round(baselineY - L.base0);
+          el.style.left = L.x + "px"; el.style.top = L.y + "px";
+          L.baseline = baselineY;
+        }
+        const capH = (fs) => (1490 / UPM) * fs;
+        const LOGO_FS = 168, MARK_D = 132, MARK_GAP = 46;
+        const REST = {};
+        function layout() {
+          document.querySelectorAll(".ch, .g, .dot").forEach((e) => { e.style.transform = ""; });
+          placeTittle(228);
+          placePeriod(per2, 228);
+          placePeriod(per5, 196);
+          // dot vertical positions relative to the span box: compute after layout
+          layoutLine(L1, CX, CY + capH(228) / 2);
+          layoutLine(L2, CX, CY + capH(228) / 2);
+          layoutLine(L3, CX, CY + capH(196) / 2);
+          layoutLine(PR, CX, 1170);
+          layoutLine(L5, CX, CY + capH(196) / 2);
+          // logo: text sits right of the mark, whole lockup centred
+          LOGO.el.style.left = "0px";
+          const lr = LOGO.el.getBoundingClientRect();
+          const total = MARK_D + MARK_GAP + lr.width;
+          const left = CX - total / 2;
+          LOGO.markX = left + MARK_D / 2;
+          layoutLine(LOGO, left + MARK_D + MARK_GAP + lr.width / 2, CY + capH(LOGO_FS) / 2);
+          // dot offsets from each host's top (baseline-relative)
+          const setDotTop = (dot, host, line, fs, topUnits) => {
+            const hr = (host === iSpan ? iSpan.parentNode : host).getBoundingClientRect();
+            const blY = line.bl.getBoundingClientRect().top;
+            dot.style.top = blY - hr.top - (topUnits / UPM) * fs + "px";
+          };
+          setDotTop(tittle, iSpan, L1, 228, 1503);
+          setDotTop(per2, per2Host, L2, 228, 322);
+          setDotTop(per5, per5Host, L5, 196, 322);
+          REST.tittle = restRect(tittle); REST.per2 = restRect(per2); REST.per5 = restRect(per5);
+          laidOut = true;
+        }
+        // screen rect of a dot when its line is at rest
+        function restRect(dot) {
+          const r = dot.getBoundingClientRect();
+          return { x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width, h: r.height };
+        }
+
+        // ---------- canvas ----------
+        const cv = document.getElementById("cv");
+        const ctx = cv.getContext("2d");
+
+        function rrect(x, y, w, h, r) {
+          r = Math.min(r, w / 2, h / 2);
+          ctx.beginPath();
+          ctx.moveTo(x + r, y);
+          ctx.arcTo(x + w, y, x + w, y + h, r);
+          ctx.arcTo(x + w, y + h, x, y + h, r);
+          ctx.arcTo(x, y + h, x, y, r);
+          ctx.arcTo(x, y, x + w, y, r);
+          ctx.closePath();
+        }
+        function ellipse(x, y, rx, ry, color) { ctx.fillStyle = color; ctx.beginPath(); ctx.ellipse(x, y, Math.max(0.01, rx), Math.max(0.01, ry), 0, 0, Math.PI * 2); ctx.fill(); }
+
+        // ----- polar shape morphing (intro) -----
+        const N = 360;
+        const shapes = {
+          circle: (a) => 1,
+          squircle: (a) => Math.pow(Math.pow(Math.abs(Math.cos(a)), 4) + Math.pow(Math.abs(Math.sin(a)), 4), -1 / 4) * 0.86,
+          tri: (a) => { const k = 3, s = (2 * Math.PI) / k; const aa = ((a + Math.PI / 2) % s + s) % s - s / 2; const poly = Math.cos(Math.PI / k) / Math.cos(aa); return lerp(poly, 1, 0.22) * 0.95; },
+          flower: (a) => 0.9 + 0.13 * Math.cos(8 * a),
+        };
+        const sample = (fn) => { const arr = new Float32Array(N); for (let i = 0; i < N; i++) arr[i] = fn((i / N) * Math.PI * 2); return arr; };
+        const SH = Object.fromEntries(Object.entries(shapes).map(([k, f]) => [k, sample(f)]));
+        function drawPolar(x, y, R, rA, rB, p, rot, sx = 1, sy = 1, color = INK) {
+          ctx.save(); ctx.translate(x, y); ctx.scale(sx, sy); ctx.rotate(rot);
+          ctx.beginPath();
+          for (let i = 0; i <= N; i++) {
+            const j = i % N, a = (j / N) * Math.PI * 2, r = R * lerp(rA[j], rB[j], p);
+            const px = Math.cos(a) * r, py = Math.sin(a) * r;
+            i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+          }
+          ctx.closePath(); ctx.fillStyle = color; ctx.fill(); ctx.restore();
+        }
+
+        // ----- gallery tile designs -----
+        const COLORS = ["#ff5a1f", "#2f6bff", "#00b37e", "#ff3ea5", "#8b5cf6", "#ffc400", "#00a3ff", "#ff4d4d"];
+        const TW = 520, TH = 390, TR = 30, PX = 556, PY = 426;
+        const designs = [
+          // 0 orbit dots (hero style)
+          (w, h, t, fg) => { for (let i = 0; i < 5; i++) { const a = t * 2.4 + (i * Math.PI * 2) / 5; ellipse(Math.cos(a) * 110, Math.sin(a) * 110, 16, 16, fg); } },
+          // 1 bouncing ball with squash
+          (w, h, t, fg) => { const ph = (t * 1.6) % 1; const y = -Math.abs(Math.sin(ph * Math.PI)) * 190 + 95; const sq = ph < 0.08 || ph > 0.92 ? 1.25 : 1; ellipse(0, y, 42 * sq, 42 / sq, fg); ctx.fillStyle = fg; ctx.globalAlpha *= 0.25; rrect(-70, 140, 140, 8, 4); ctx.fill(); ctx.globalAlpha /= 0.25; },
+          // 2 concentric pulse rings
+          (w, h, t, fg) => { ctx.strokeStyle = fg; ctx.lineWidth = 10; for (let i = 0; i < 4; i++) { const r = ((t * 0.7 + i / 4) % 1) * 170; ctx.globalAlpha = 1 - r / 170; ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); ctx.stroke(); } ctx.globalAlpha = 1; },
+          // 3 rotating squares wave
+          (w, h, t, fg) => { ctx.fillStyle = fg; for (let i = -3; i <= 3; i++) for (let j = -2; j <= 2; j++) { ctx.save(); ctx.translate(i * 62, j * 62); ctx.rotate(Math.sin(t * 2.2 - (i + j) * 0.5) * 0.8); const s = 18 + 10 * Math.sin(t * 2.2 - (i + j) * 0.5); ctx.fillRect(-s / 2, -s / 2, s, s); ctx.restore(); } },
+          // 4 sine lines
+          (w, h, t, fg) => { ctx.strokeStyle = fg; ctx.lineWidth = 8; ctx.lineCap = "round"; for (let k = -3; k <= 3; k++) { ctx.beginPath(); for (let x = -200; x <= 200; x += 8) { const y = k * 40 + Math.sin(x / 45 + t * 3 + k * 0.6) * 18; x === -200 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); } ctx.stroke(); } },
+          // 5 morphing blob
+          (w, h, t, fg) => { const ks = ["circle", "squircle", "flower", "tri"]; const q = (t * 0.8) % 4; const i = Math.floor(q); drawPolar(0, 0, 120, SH[ks[i]], SH[ks[(i + 1) % 4]], eInOut3(clamp((q - i) * 1.6)), t * 0.6, 1, 1, fg); },
+          // 6 bars
+          (w, h, t, fg) => { ctx.fillStyle = fg; for (let i = 0; i < 9; i++) { const v = 0.5 + 0.5 * Math.sin(t * 3.1 + i * 0.7); const bh = 40 + v * 200; rrect(-200 + i * 46, 120 - bh, 30, bh, 15); ctx.fill(); } },
+          // 7 spiral of dots
+          (w, h, t, fg) => { for (let i = 0; i < 26; i++) { const a = i * 0.55 + t * 1.5, r = 12 + i * 6.4; ellipse(Math.cos(a) * r, Math.sin(a) * r, 4 + i * 0.35, 4 + i * 0.35, fg); } },
+          // 8 pendulums
+          (w, h, t, fg) => { ctx.strokeStyle = fg; ctx.fillStyle = fg; ctx.lineWidth = 6; for (let i = 0; i < 7; i++) { const a = Math.sin(t * (2 + i * 0.18)) * 0.6; const x0 = -150 + i * 50, L = 210; const x = x0 + Math.sin(a) * L * 0.4, y = -140 + Math.cos(a) * L; ctx.beginPath(); ctx.moveTo(x0, -150); ctx.lineTo(x, y); ctx.stroke(); ellipse(x, y, 16, 16, fg); } },
+          // 9 checker flip
+          (w, h, t, fg) => { ctx.fillStyle = fg; for (let i = -3; i <= 3; i++) for (let j = -2; j <= 2; j++) { const f = Math.cos(t * 2.4 + (i - j) * 0.45); const s = 54; ctx.fillRect(i * 58 - (s * Math.abs(f)) / 2, j * 58 - s / 2, s * Math.abs(f), s); } },
+          // 10 triangle trio rotating
+          (w, h, t, fg) => { for (let i = 0; i < 3; i++) drawPolar((i - 1) * 130, 0, 58, SH.tri, SH.tri, 0, t * (i % 2 ? -1.6 : 1.6) + i, 1, 1, fg); },
+          // 11 dashed ring + satellite
+          (w, h, t, fg) => { ctx.strokeStyle = fg; ctx.lineWidth = 10; ctx.setLineDash([18, 22]); ctx.lineDashOffset = -t * 60; ctx.beginPath(); ctx.arc(0, 0, 130, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); const a = t * 1.8; ellipse(Math.cos(a) * 130, Math.sin(a) * 130, 26, 26, fg); ellipse(0, 0, 36 + 8 * Math.sin(t * 4), 36 + 8 * Math.sin(t * 4), fg); },
+        ];
+        const tileCache = new Map();
+        function tileSpec(c, r) {
+          const key = c + "," + r;
+          if (tileCache.has(key)) return tileCache.get(key);
+          let spec;
+          if (c === 0 && r === 0) spec = { d: 0, bg: INK, fg: "#ffffff" };
+          else {
+            const d = Math.floor(hash(c + 50, r + 50) * designs.length);
+            const mode = hash(c * 7 + 3, r * 13 + 1);
+            if (mode < 0.22) spec = { d, bg: INK, fg: "#ffffff" };
+            else if (mode < 0.44) spec = { d, bg: "#f0f0f1", fg: INK };
+            else { const col = COLORS[Math.floor(hash(c + 9, r - 4) * COLORS.length)]; spec = { d, bg: col, fg: hash(c, r) < 0.5 ? "#ffffff" : INK }; }
+            spec.ph = hash(c - 3, r + 8) * 10;
+          }
+          tileCache.set(key, spec);
+          return spec;
+        }
+        function drawTile(spec, t, contentAlpha = 1) {
+          ctx.fillStyle = spec.bg; rrect(-TW / 2, -TH / 2, TW, TH, TR); ctx.fill();
+          if (contentAlpha <= 0) return;
+          ctx.save(); ctx.clip(); ctx.globalAlpha *= contentAlpha;
+          designs[spec.d](TW, TH, t + (spec.ph || 0), spec.fg);
+          ctx.restore();
+        }
+
+        // hero (orbit → line)
+        const SNAP0 = 12.5;
+        function heroDots(t) {
+          const pts = [];
+          for (let i = 0; i < 5; i++) {
+            const orbit = (tt) => { const a = tt * 2.4 + (i * Math.PI * 2) / 5 - Math.PI / 2; const br = 110 + 6 * Math.sin(tt * 3 + i); return [Math.cos(a) * br, Math.sin(a) * br]; };
+            const ts = SNAP0 + i * S16;
+            const p = spring(seg(t, ts, ts + 0.42), 6.5, 1.6);
+            const o = orbit(Math.min(t, ts));
+            const lx = (i - 2) * 62, ly = 0;
+            pts.push([lerp(o[0], lx, p), lerp(o[1], ly, p), 1 + 0.35 * Math.sin(Math.PI * seg(t, ts, ts + 0.18))]);
+          }
+          return pts;
+        }
+
+        // ---------- timeline of camera for gallery ----------
+        const ZS = 0.47; // gallery zoom
+        const CAMY_G = TH / 2 + (PY - TH) / 2; // gap between hero row and next row
+        function driftTime(t) {
+          // rows drift from 6.4, slow to rest between 9.8 and 10.6
+          if (t < 9.8) return Math.max(0, t - 6.4);
+          const tau = Math.min(t - 9.8, 0.8);
+          return 3.4 + tau - (tau * tau) / 1.6;
+        }
+        function splitAmt(t) { return 365 * (eInOut3(seg(t, 7.3, 7.75)) - eInOut3(seg(t, 9.5, 9.95))); }
+        function rowOffset(r, t) { return (r % 2 === 0 ? 1 : -1) * 70 * driftTime(t); }
+
+        // ---------- glitch variants ----------
+        const VARS = ["serif", "mono", "outline", "chip", "stripe", "shape", "dots"];
+        function setVariant(o, state, seed) {
+          // state: -2 hidden, -1 clean, >=0 variant index
+          if (o.state === state && o.seed === seed) return;
+          o.state = state; o.seed = seed;
+          const v = o.v;
+          if (state === -2) { o.b.style.visibility = "hidden"; v.style.display = "none"; return; }
+          if (state === -1) { o.b.style.visibility = ""; v.style.display = "none"; return; }
+          o.b.style.visibility = "hidden";
+          const col = COLORS[Math.floor(hash(seed, 77) * COLORS.length)];
+          const col2 = COLORS[Math.floor(hash(seed, 91) * COLORS.length)];
+          v.className = "gv"; v.removeAttribute("style"); v.textContent = o.c;
+          v.style.display = "block"; v.style.color = col;
+          const kind = VARS[state % VARS.length];
+          if (kind === "serif") v.classList.add("v-serif");
+          else if (kind === "mono") v.classList.add("v-mono");
+          else if (kind === "outline") v.classList.add("v-outline");
+          else if (kind === "chip") { v.classList.add("v-chip"); v.style.background = col; }
+          else if (kind === "stripe") { v.classList.add("v-stripe"); v.style.backgroundImage = `repeating-linear-gradient(0deg, ${col} 0 0.06em, transparent 0.06em 0.12em)`; }
+          else if (kind === "dots") { v.classList.add("v-stripe"); v.style.backgroundImage = `radial-gradient(circle, ${col} 0 0.032em, transparent 0.036em)`; v.style.backgroundSize = "0.09em 0.09em"; }
+          else if (kind === "shape") {
+            v.textContent = ""; v.classList.add("v-shape"); v.style.background = col;
+            const k = Math.floor(hash(seed, 5) * 3);
+            v.style.borderRadius = k === 0 ? "50%" : k === 1 ? "0.12em" : "0";
+            if (k === 2) v.style.clipPath = "polygon(50% 0, 100% 100%, 0 100%)";
+            if (hash(seed, 8) < 0.5) v.style.background = col2;
+          }
+        }
+
+        // logo glitch plan: steps of a 16th from 16.0; resolve at 17.5 (step 12)
+        const LOGO_T0 = 16.0, LOGO_RES = 17.5;
+        const NL = LOGO.chars.length;
+        const plan = LOGO.chars.map((o, i) => {
+          const appear = Math.floor(hash(i, 1) * 4) + (i < 2 ? 0 : 0);
+          const settle = 8 + Math.floor(hash(i, 2) * 4); // 8..11 settle early, else at 12
+          return { appear, settle };
+        });
+        function logoState(i, t) {
+          if (t < LOGO_T0) return [-2, 0];
+          const step = Math.floor((t - LOGO_T0) / S16 + 1e-6);
+          if (step >= 12) return [-1, 0];
+          const p = plan[i];
+          if (step < p.appear) return [-2, 0];
+          if (step === 6) return [-1, 0]; // whole word flashes clean once
+          if (step >= p.settle && hash(i, step) < 0.6) return [-1, 0];
+          // hold variants for 1–2 steps
+          const hstep = step - (hash(i, step >> 1) < 0.4 ? step & 1 : 0);
+          return [Math.floor(hash(i * 31 + hstep, 3) * VARS.length), i * 100 + hstep];
+        }
+
+        // ---------- per-frame draw ----------
+        function setLine(L, show) { L.el.style.visibility = show ? "visible" : "hidden"; }
+        function chT(el, x, y, s = 1, sy = s, o = 1, rot = 0) {
+          el.style.transform = `translate(${x}px, ${y}px) scale(${s}, ${sy}) rotate(${rot}deg)`;
+          el.style.opacity = o;
+        }
+
+        function draw(t) {
+          if (!laidOut) layout();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.clearRect(0, 0, W, H);
+
+          // ===== Scene 1: shapes → tittle (0 – 2) / "Motion designs" (2 – 4) =====
+          const t1 = REST.tittle;
+          const showL1 = t >= 1.84 && t < 4.4;
+          // one shared ease for the L1 → L2 push so the two lines never overlap
+          function pushP(t, k) { const st = 3.8 + 0.006 * k; return eInOutExpo(seg(t, st, st + 0.5)); }
+          setLine(L1, showL1);
+          if (t < 2.0) {
+            // pop in
+            const pop = spring(seg(t, 0.0, 0.55), 6, 1.4);
+            let R = 112 * pop, from = SH.circle, to = SH.circle, p = 0, rot = 0;
+            if (t >= 0.5 && t < 1.0) { from = SH.circle; to = SH.squircle; p = eOutBack(seg(t, 0.5, 0.78), 1.4); rot = lerp(0, Math.PI / 4, eOut3(seg(t, 0.5, 0.9))); R = lerp(112, 128, eOut3(seg(t, 0.5, 0.8))); }
+            else if (t >= 1.0 && t < 1.25) { from = SH.squircle; to = SH.tri; p = eOutBack(seg(t, 1.0, 1.2), 1.4); rot = Math.PI / 4 + lerp(0, (Math.PI * 2) / 3 - Math.PI / 4, eOut3(seg(t, 1.0, 1.22))); R = 128; }
+            else if (t >= 1.25 && t < 1.5) { from = SH.tri; to = SH.flower; p = eOutBack(seg(t, 1.25, 1.45), 1.2); rot = (Math.PI * 2) / 3 + eOut3(seg(t, 1.25, 1.5)) * 0.5; R = 128; }
+            if (t >= 1.5) {
+              // collapse to the tittle: shrink + travel on an arc, land at 2.0
+              const q = seg(t, 1.5, 2.0);
+              const tx = t1.x, ty = t1.y;
+              const shrink = eInOut3(seg(t, 1.5, 1.72));
+              const rf = Math.max(t1.w, t1.h) / 2;
+              const flowerTo = lerp(0, 1, shrink);
+              const travel = eInOut3(seg(t, 1.6, 2.0));
+              const x = lerp(CX, tx, travel);
+              const arc = -Math.sin(Math.PI * travel) * 230;
+              const y = lerp(CY, ty, eIn3(travel) * 0.25 + travel * 0.75) + arc;
+              // stretch along the fall a touch, squash on impact
+              const fall = seg(t, 1.86, 2.0);
+              const sxy = 1 + 0.18 * Math.sin(Math.PI * fall);
+              drawPolar(x, y, lerp(128, rf, shrink), SH.flower, SH.circle, flowerTo, (Math.PI * 2) / 3 + 0.5 + q * 1.2, (t1.w / (2 * rf)) * (1 / sxy) + 0 * q, (t1.h / (2 * rf)) * sxy);
+              void q;
+            } else {
+              drawPolar(CX, CY, R, from, to, p, rot);
+            }
+            tittle.style.visibility = "hidden";
+          } else tittle.style.visibility = "";
+
+          if (showL1) {
+            const iIdx = 3;
+            L1.chars.forEach((c, k) => {
+              if (c.w === 0) {
+                if (k === iIdx) {
+                  // stem grows up to meet the dot
+                  const g = eOut3(seg(t, 1.84, 2.0));
+                  const land = Math.sin(Math.PI * seg(t, 2.0, 2.16)) * 0.1;
+                  chT(c.el, 0, 0, 1, g * (1 - land), t < 1.84 ? 0 : 1);
+                } else {
+                  const st = 2.0 + 0.03 * Math.abs(k - iIdx);
+                  const p = seg(t, st, st + 0.6);
+                  const sp = spring(p, 6, 1.7);
+                  chT(c.el, (k - iIdx) * -30 * (1 - sp), 40 * (1 - sp), sp, sp, clamp(p * 5));
+                }
+              } else {
+                const st = 2.5 + 0.03 * (k - 6);
+                const p = eOutExpo(seg(t, st, st + 0.55));
+                chT(c.el, 0, 300 * (1 - p), 1, 1, 1);
+              }
+              // exit 4.0: all letters lift out of the mask
+              if (t >= 3.8) {
+                const q = pushP(t, k);
+                c.el.style.transform += ` translateY(${-300 * q}px)`;
+              }
+            });
+            // tittle: squash on landing, follows the ı in the exit
+            const land = Math.sin(Math.PI * seg(t, 2.0, 2.16));
+            const ex = pushP(t, iIdx);
+            tittle.style.transformOrigin = "50% 100%";
+            tittle.style.transform = `translateY(${-300 * ex}px) scale(${1 + 0.22 * land}, ${1 - 0.2 * land})`;
+          }
+
+          // ===== Scene 2: "made by AI." (4 – 6.3) =====
+          const showL2 = t >= 3.98 && t < 6.4;
+          setLine(L2, showL2);
+          if (showL2) {
+            L2.chars.forEach((c, k) => {
+              if (c.w < 2) {
+                const p = pushP(t, k);
+                let y = 300 * (1 - p), o = 1;
+                if (t >= 5.82) { const q = eIn3(seg(t, 5.82 + 0.012 * k, 6.06 + 0.012 * k)); y += 300 * q; }
+                chT(c.el, 0, y, 1, 1, o);
+              }
+            });
+            // AI glitch: 16ths from 4.5, clean at 4.875
+            const steps = [[4.5, [0, -2]], [4.5 + S16, [3, 1]], [4.5 + 2 * S16, [5, 2]], [4.5 + 3 * S16, [-1, 4]], [4.5 + 4 * S16, [-1, -1]]];
+            aiChars.forEach((o, j) => {
+              let st = -2, seed = 0;
+              for (const [ts, arr] of steps) if (t >= ts) { st = arr[j]; seed = Math.round(ts * 100) + j * 7; }
+              setVariant(o, st, seed);
+              let y = 0;
+              if (t >= 5.82) { const q = eIn3(seg(t, 5.9 + 0.012 * j, 6.1 + 0.012 * j)); y = 300 * q; }
+              chT(o.g, 0, y);
+            });
+            // period pops on beat 5.0, handed to canvas at 6.0
+            const pp = spring(seg(t, 5.0, 5.45), 7, 1.8);
+            chT(per2Host, 0, 0, 1, 1, 1);
+            per2.style.transform = `scale(${pp})`;
+            per2.style.visibility = t < 6.0 ? "" : "hidden";
+          }
+
+          // ===== Scene 3: dot → tile → gallery (6 – 10.8), hero close-up (→ 14.5) =====
+          if (t >= 6.0 && t < 14.6) {
+            const pr = REST.per2;
+            // camera
+            const zOut = eInOut3(seg(t, 6.38, 7.45));
+            const zIn = eInOutExpo(seg(t, 9.85, 10.85));
+            let s = Math.exp(lerp(Math.log(1), Math.log(ZS), zOut));
+            let camX = 0, camY = lerp(0, CAMY_G, zOut);
+            const heroX = rowOffset(0, t), heroY = -splitAmt(t);
+            const SZ = 2.2;
+            if (zIn > 0) {
+              // move hero to (CX, 590) at SZ
+              const gx = (heroX - camX) * s + CX, gy = (heroY - camY) * s + CY;
+              const sx = Math.exp(lerp(Math.log(s), Math.log(SZ), zIn));
+              const px = lerp(gx, CX, zIn), py = lerp(gy, 590, zIn);
+              s = sx; camX = heroX - (px - CX) / s; camY = heroY - (py - CY) / s;
+            }
+            const toScreen = (wx, wy) => [(wx - camX) * s + CX, (wy - camY) * s + CY];
+
+            // neighbours
+            const neighA = 1 - eOut3(seg(t, 10.0, 10.5));
+            if (t >= 6.4 && neighA > 0) {
+              for (let r = -4; r <= 5; r++) for (let c = -6; c <= 6; c++) {
+                if (c === 0 && r === 0) continue;
+                const ox = rowOffset(r, t);
+                const wrapW = PX * 13;
+                let wx = c * PX + ox; wx = ((wx + wrapW / 2) % wrapW + wrapW) % wrapW - wrapW / 2;
+                const wy = r * PY + (r <= 0 ? -splitAmt(t) : splitAmt(t));
+                const [sx, sy] = toScreen(wx, wy);
+                const half = (TW / 2) * s;
+                if (sx < -half || sx > W + half || sy < -half || sy > H + half) continue;
+                const ring = Math.max(Math.abs(c), Math.abs(r));
+                const st = 6.42 + 0.06 * ring + 0.03 * hash(c, r);
+                const pp = spring(seg(t, st, st + 0.6), 6, 1.5);
+                if (pp <= 0) continue;
+                ctx.save(); ctx.translate(sx, sy); ctx.scale(s * (0.6 + 0.4 * pp), s * (0.6 + 0.4 * pp));
+                ctx.globalAlpha = clamp(pp * 3) * neighA;
+                drawTile(tileSpec(c, r), t);
+                ctx.restore();
+              }
+            }
+
+            // hero tile
+            const [hx, hy] = toScreen(heroX, heroY);
+            let rx = hx, ry = hy, rw = TW * s, rh = TH * s, rr = TR * s, inner = 1;
+            if (t < 6.6) {
+              // morph from the period dot
+              const m = eInOut3(seg(t, 6.0, 6.55));
+              const m2 = eOutBack(seg(t, 6.0, 6.55), 1.1);
+              rx = lerp(pr.x, hx, m); ry = lerp(pr.y, hy, m);
+              rw = lerp(pr.w, TW * s, m2); rh = lerp(pr.h, TH * s, m2);
+              rr = lerp(Math.min(pr.w, pr.h) / 2, TR * s, eOut3(seg(t, 6.15, 6.55)));
+              inner = seg(t, 6.3, 6.6);
+            }
+            let heroAlpha = 1;
+            if (t >= 14.0) {
+              // collapse into the period of "prompt."
+              const m = eInOut3(seg(t, 14.0, 14.5));
+              const m2 = eInOut3(seg(t, 14.0, 14.42));
+              const p5 = REST.per5;
+              rx = lerp(rx, p5.x, m); ry = lerp(ry, p5.y, m) - Math.sin(Math.PI * m) * 120;
+              rw = lerp(rw, p5.w, m2); rh = lerp(rh, p5.h, m2);
+              rr = lerp(rr, Math.min(p5.w, p5.h) / 2, eIn3(m2));
+              inner = 1 - seg(t, 14.0, 14.14);
+              if (t >= 14.5) heroAlpha = 0;
+            }
+            if (heroAlpha > 0) {
+              ctx.save(); ctx.translate(rx, ry);
+              ctx.fillStyle = INK; rrect(-rw / 2, -rh / 2, rw, rh, rr); ctx.fill();
+              if (inner > 0) {
+                ctx.save(); ctx.clip();
+                const k = rw / TW; ctx.scale(k, k); ctx.globalAlpha = inner;
+                for (const [x, y, sc] of heroDots(t)) ellipse(x, y, 16 * sc, 16 * sc, "#ffffff");
+                ctx.restore();
+              }
+              ctx.restore();
+            }
+          }
+
+          // "All in one gallery."
+          const showL3 = t >= 7.4 && t < 9.9;
+          setLine(L3, showL3);
+          if (showL3) {
+            L3.chars.forEach((c, k) => {
+              const st = 7.5 + 0.09 * c.w + 0.012 * k;
+              const p = eOutExpo(seg(t, st, st + 0.55));
+              const q = eIn3(seg(t, 9.42 + 0.01 * k, 9.66 + 0.01 * k));
+              chT(c.el, 0, 280 * (1 - p) - 280 * q);
+            });
+          }
+
+          // prompt typing
+          const showPR = t >= 10.7 && t < 14.3;
+          setLine(PR, showPR);
+          if (showPR) {
+            const n = PR.chars.length, t0 = 10.75, t1e = 12.2;
+            PR.chars.forEach((c, k) => {
+              const st = t0 + ((t1e - t0) * k) / (n - 1);
+              const p = seg(t, st, st + 0.12);
+              const q = eIn3(seg(t, 14.0, 14.22));
+              chT(c.el, 0, 14 * (1 - eOut3(p)) + 40 * q, 1, 1, eOut3(p) * (1 - q));
+            });
+          }
+
+          // "Each with its prompt."
+          const showL5 = t >= 14.0 && t < 15.95;
+          setLine(L5, showL5);
+          if (showL5) {
+            L5.chars.forEach((c, k) => {
+              const st = 14.02 + 0.075 * c.w + 0.01 * k;
+              const p = eOutExpo(seg(t, st, st + 0.55));
+              const q = eIn3(seg(t, 15.5 + 0.008 * k, 15.72 + 0.008 * k));
+              chT(c.el, 0, 280 * (1 - p) + 280 * q);
+            });
+            // period: canvas tile lands at 14.5
+            per5.style.visibility = t >= 14.5 && t < 15.5 ? "" : "hidden";
+            const land = Math.sin(Math.PI * seg(t, 14.5, 14.66));
+            per5.style.transform = `scale(${1 + 0.25 * land}, ${1 - 0.2 * land})`;
+          }
+
+          // ===== Scene 5: dot hops off, falls to centre, cracks; wordmark glitches in =====
+          if (t >= 15.5) {
+            const p5 = REST.per5;
+            const fd = MARK_D;
+            const markY = CY;
+            let x, y, d, crack = 0, sq = 1;
+            if (t < 16.0) {
+              const q = seg(t, 15.5, 16.0);
+              x = lerp(p5.x, CX, eInOut3(q));
+              const up = -360 * Math.sin(Math.PI * Math.min(1, q * 1.0));
+              y = lerp(p5.y, markY, eIn3(q)) + up * (1 - q);
+              d = lerp(p5.w, fd, eInOut3(seg(t, 15.55, 15.95)));
+              sq = 1 + 0.12 * Math.sin(Math.PI * seg(t, 15.8, 16.0));
+            } else {
+              const mv = eInOutExpo(seg(t, 16.06, 16.62));
+              x = lerp(CX, LOGO.markX, mv); y = markY; d = fd;
+              crack = 1;
+              sq = 1 - 0.14 * Math.sin(Math.PI * seg(t, 16.0, 16.14));
+            }
+            drawMark(x, y, d, t, crack, sq);
+          }
+
+          const showLogo = t >= 16.0;
+          setLine(LOGO, showLogo);
+          if (showLogo) {
+            LOGO.chars.forEach((o, i) => {
+              const [st, seed] = logoState(i, t);
+              setVariant(o, st, seed);
+              // tiny jitter on glitch steps
+              const step = Math.floor((t - LOGO_T0) / S16);
+              const j = st >= 0 ? (hash(i, step + 40) - 0.5) * 14 : 0;
+              o.g.style.transform = `translateY(${j}px)`;
+            });
+          }
+        }
+
+        // cracked dot mark
+        function drawMark(x, y, d, t, crack, sq) {
+          const r = d / 2;
+          if (!crack) { ctx.save(); ctx.translate(x, y); ctx.scale(1 / sq, sq); ellipse(0, 0, r, r, INK); ctx.restore(); return; }
+          // crack opens at 16.0 (spring), settles to a fixed gap; snaps tighter on the resolve
+          const open = spring(seg(t, 16.0, 16.6), 5, 1.6);
+          const resolve = spring(seg(t, LOGO_RES, LOGO_RES + 0.5), 6, 1.6);
+          const gap = r * (0.2 * open - 0.08 * resolve) * (1 + 0.6 * Math.sin(Math.PI * seg(t, 16.0, 16.25)));
+          const tilt = 0.12 * (1 - open);
+          // zig-zag crack path from top to bottom
+          const zz = [[0.1, -1.3], [-0.12, -0.3], [0.13, 0.12], [-0.08, 1.3]];
+          ctx.save(); ctx.translate(x, y); ctx.scale(1 / sq, sq);
+          for (const side of [-1, 1]) {
+            ctx.save();
+            ctx.translate(side * gap / 2, 0);
+            ctx.rotate(side * tilt);
+            ctx.beginPath();
+            ctx.moveTo(zz[0][0] * r, zz[0][1] * r);
+            for (const [zx, zy] of zz) ctx.lineTo(zx * r, zy * r);
+            ctx.lineTo(side * 2 * r, 1.2 * r); ctx.lineTo(side * 2 * r, -1.2 * r); ctx.closePath();
+            ctx.clip();
+            ellipse(0, 0, r, r, INK);
+            ctx.restore();
+          }
+          ctx.restore();
+        }
+
+        // ---------- register ----------
+        // a setter-backed proxy: GSAP writes `t` on every render (seek included, callbacks suppressed or not)
+        let curT = 0;
+        const proxy = {};
+        Object.defineProperty(proxy, "t", { get: () => curT, set: (v) => { curT = v; draw(v); } });
+        window.__timelines = window.__timelines || {};
+        const tl = gsap.timeline({ paused: true });
+        tl.fromTo(proxy, { t: 0 }, { t: 20, duration: 20, ease: "none", immediateRender: false }, 0);
+        window.__timelines["main"] = tl;
+        window.__draw = draw;
+        const go = () => { laidOut = false; draw(curT); };
+        if (document.fonts && document.fonts.ready) document.fonts.ready.then(go);
+        draw(0);
+      })();
+    </script>
+  </body>
+</html>

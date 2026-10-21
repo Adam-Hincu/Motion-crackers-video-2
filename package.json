@@ -1,0 +1,24 @@
+{
+  "name": "motion-crackers-video-2",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Adam-Hincu/Motion-crackers-video-2.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Adam-Hincu/Motion-crackers-video-2/issues"
+  },
+  "homepage": "https://github.com/Adam-Hincu/Motion-crackers-video-2#readme",
+  "devDependencies": {
+    "gsap": "^3.14.2",
+    "hyperframes": "^0.8.183"
+  }
+}
